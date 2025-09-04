@@ -1,5 +1,6 @@
 import requests
 import json
+import os
 from functools import wraps
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -11,7 +12,7 @@ from django.conf import settings
 
 SPECTERX_CONFIG = {
     'api_base_url': 'https://staging-api.specterx.com',
-    'api_key': 'OcEWgYAKcn7jjN6jz7qMh2I6VZkYQ0Qo4UPnVt2R',
+    'api_key': os.getenv('SPECTERX_API_KEY'),
     'default_regions': ['eu-central']
 }
 
