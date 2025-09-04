@@ -1,10 +1,12 @@
 import requests
 import json
+from functools import wraps
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
 from django.conf import settings
 
 SPECTERX_CONFIG = {
@@ -13,9 +15,39 @@ SPECTERX_CONFIG = {
     'default_regions': ['eu-central']
 }
 
+def cors_enabled(allowed_methods):
+    """
+    Decorator to handle CORS preflight requests and add CORS headers
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(request, *args, **kwargs):
+            # Handle preflight OPTIONS request
+            if request.method == 'OPTIONS':
+                response = HttpResponse()
+                response['Access-Control-Allow-Origin'] = '*'
+                response['Access-Control-Allow-Methods'] = ', '.join(allowed_methods + ['OPTIONS'])
+                response['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, SpecterxUserId, X-Requested-With'
+                response['Access-Control-Max-Age'] = '86400'
+                return response
+            
+            # Call the original view function
+            result = func(request, *args, **kwargs)
+            
+            # Add CORS headers to the response
+            if hasattr(result, '__setitem__'):  # Check if it's a response object
+                result['Access-Control-Allow-Origin'] = '*'
+                result['Access-Control-Allow-Methods'] = ', '.join(allowed_methods + ['OPTIONS'])
+                result['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, SpecterxUserId, X-Requested-With'
+            
+            return result
+        return wrapper
+    return decorator
 
 
-@api_view(['POST'])
+
+@cors_enabled(['POST'])
+@api_view(['POST', 'OPTIONS'])
 @csrf_exempt
 def fetch_and_upload_file(request):
     """
@@ -126,19 +158,24 @@ def fetch_and_upload_file(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@api_view(['GET'])
+@cors_enabled(['GET'])
+@api_view(['GET', 'OPTIONS'])
+@csrf_exempt
 def get_policies(request):
     """
     API endpoint to fetch policies from SpecterX admin API
     """
     try:
+        user_id = request.headers.get('SpecterxUserId') or request.GET.get('user_id')
         policies_url = f"{SPECTERX_CONFIG['api_base_url']}/admin/policies?fields=settings"
         headers = {
-            'X-Api-Key': SPECTERX_CONFIG['api_key'],
-            'Content-Type': 'application/json',
-            # 'x-amz-security-token': 'IQoJb3JpZ2luX2VjEMT//////////wEaDGV1LWNlbnRyYWwtMSJHMEUCIDxUEgieCnpUpSLkb7XZYLpY9XlGRRN+WwFRE0Vsho4xAiEAj45k+7FwdoUwgD0uTxH+8/vnYGyjo31K4b+njjHG2bQq1gQILRADGgwwNzU0OTM5MDg1MTIiDGCnsuDnTLeN2+KTUSqzBLZllSMMySCdGR/jqwWyy1Vs596/fucQiB9v7MI2rCdRTP0VflpNe8S/ARxjG/1/CZzLnuJvPtbPB7mH3aSLmleXlmN+jN8IAi8F/URvvK2IuRB57oF6NDbNw+IUDWCXQiZW/ZsKEEHjdpeNO2bmTbJLi9mX/4pGff+zAZGeVdxUoqp4HvLlOKNp16hyqCA4jm7lpSYnC5wpNm/ks6fj2JSV9xDaQ/hL52RGbnvvB2gaTK6zarRnoMx1X12XgsvlJL+c5wySZQo9GmDPBPvZiZXXAHKc4vjBbqA6aKfNlM38o3MDPpTMzeE3fdfNvIyEZn/NM3Bp6b9q9VOJy3D8IOH4fNdvzwmZOEd/iAS5jbBjU/6lsyXJEcEfSYiKTROWIAzAWKZsNzYzEY7p+t1ZfYy4PVP/Rf4g8g7ertv0EwziYDYDJS2aTe1RWX35FSyPwgDmMwnNmb1B5cFRGZ+tkIvChjaAiL6zor0Zhek42xy9cqiENxvmbeIoLY864APPV7owOIPW9Rret5YZc/5w4TXHxMujxfMAEX1go70nVYf6gZOdGMylFmPoBq4uRmP+irwhhZbORVd5gThss3RrvcRSnxSKMniSEMP+5ppHkx/Wqc579hz6E9SUORg/BepmZiBPkvVfL0VZ0EP9UEZwmi87vbEh8gtvEg8Y4s5ioAMHmQVUDS/Uv8mZG+Ci80neJsZ9veeWwqKZ5YfkIktg8xY5QxbqaTexSvrOlQjHsb5FC4HMMOG828UGOoUCEQ/CeF5eAvEapZkEkFkYovjlGdNv45xxjN1Fx9ux7+PiV5mVNGl6AmBj/Oz3b8z1q+Hh5dDhQV8jWE94g8JQSnvF1/vUTNyM2lQ/LJgiToXs/N5SKHRmzXfQenTAeTRwv8MxodhBEwH66fnTxitH0qGTVVx2rFV8Yjr9sm9ioMEjKWZ2LIwaitFTujxFpXWHreHVSGpD2JH+byDedAKKAb3tmQqKWl0sMhYOwjTAWMU5jTKHzb8YDvemYzF7tOn6hzOJhMMyBGiYC+gWoZHPNHURnjQdI+Ecm8czj3rTitZW11dwHLPDRc/OIaAk9HeSgBqGlJBhKf75UyhYNX3diWxXPO4T',
-            # 'authorization': 'AWS4-HMAC-SHA256 Credential=ASIARDE6JUAQMYXMDQXQ/20250902/eu-central-1/execute-api/aws4_request, SignedHeaders=host;x-amz-date;x-amz-security-token, Signature=0327b7b6621c6e40f52007113b49150679c16e1dd39d20a23634973eae157609',
-            # 'x-amz-date': '20250902T124926Z'
+            'accept': 'application/json',
+            'content-type': 'application/json',
+            'user-agent': 'SpecterX-PolicyGetter/1.0',
+            'origin': 'https://staging-app.specterx.com',
+            'referer': 'https://staging-app.specterx.com/',
+            'X-API-Key': SPECTERX_CONFIG['api_key'],
+            'SpecterxUserId': user_id,
         }
         
         response = requests.get(policies_url, headers=headers, timeout=30)
@@ -176,7 +213,204 @@ def get_policies(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@api_view(['GET'])
+@cors_enabled(['PUT'])
+@api_view(['PUT', 'OPTIONS'])
+@csrf_exempt
+def set_file_policy(request, file_id):
+    """
+    API endpoint to set/update a policy for a specific file
+    """
+    try:
+        # Extract required parameters
+        policy_id = request.data.get('policy_id')
+        user_id = request.headers.get('SpecterxUserId') or request.data.get('user_id')
+        
+        # Validate required parameters
+        if not policy_id:
+            return Response({
+                'error': 'Missing required parameter: policy_id'
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        if not user_id:
+            return Response({
+                'error': 'Missing required parameter: user_id (header SpecterxUserId or body user_id)'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Set file policy via SpecterX API
+        url = f"{SPECTERX_CONFIG['api_base_url']}/access/ext/files/{file_id}/policy"
+        headers = {
+            'accept': 'application/json, text/plain, */*',
+            'content-type': 'application/json; charset=UTF-8',
+            'origin': 'https://staging-app.specterx.com',
+            'referer': 'https://staging-app.specterx.com/',
+            'user-agent': 'SpecterX-PolicySetter/2.0',
+            'X-API-Key': SPECTERX_CONFIG['api_key'],
+            'SpecterxUserId': user_id,
+        }
+        
+        payload = {'policy_id': policy_id}
+        
+        response = requests.put(
+            url,
+            headers=headers,
+            json=payload,
+            verify=False,
+            timeout=60
+        )
+        
+        if not response.ok:
+            return Response({
+                'error': 'Failed to set file policy',
+                'message': f'SpecterX API returned status {response.status_code}',
+                'details': response.text[:500]
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Handle response
+        try:
+            result = response.json()
+        except ValueError:
+            result = {'raw': response.text}
+        
+        return Response({
+            'success': True,
+            'message': 'File policy set successfully',
+            'file_id': file_id,
+            'policy_id': policy_id,
+            'result': result
+        }, status=status.HTTP_200_OK)
+        
+    except requests.exceptions.RequestException as e:
+        return Response({
+            'error': 'Network request failed',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    except Exception as e:
+        return Response({
+            'error': 'Internal server error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@cors_enabled(['POST'])
+@api_view(['POST', 'OPTIONS'])
+@csrf_exempt
+def share_file(request):
+    """
+    API endpoint to share a file with recipients
+    """
+    try:
+        # Extract required parameters
+        file_id = request.data.get('file_id')
+        recipient = request.data.get('recipient')
+        user_id = request.headers.get('SpecterxUserId') or request.data.get('user_id')
+        
+        # Optional parameters
+        policy_id = request.data.get('policy_id')
+        notify = request.data.get('notify', True)
+        protect_message = request.data.get('protect_message', True)
+        message_id = request.data.get('message_id', '')
+        read_only = request.data.get('read_only', False)
+        actions = request.data.get('actions', [])
+        phone = request.data.get('phone')
+        prefix = request.data.get('prefix')
+        
+        # Validate required parameters
+        if not file_id:
+            return Response({
+                'error': 'Missing required parameter: file_id'
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        if not recipient:
+            return Response({
+                'error': 'Missing required parameter: recipient'
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        if not user_id:
+            return Response({
+                'error': 'Missing required parameter: user_id (header SpecterxUserId or body user_id)'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Build payload
+        files_entry = {'file_id': file_id}
+        if policy_id:
+            files_entry['policy_id'] = policy_id
+            
+        user_entry = {
+            'readOnly': read_only,
+            'actions': actions,
+            'email': recipient,
+        }
+        
+        if phone or prefix:
+            user_entry['phoneNumber'] = {'phone': phone or '', 'prefix': prefix or ''}
+            
+        payload = {
+            'files': [files_entry],
+            'notify_recipients': notify,
+            'message_id': message_id,
+            'protect_message': protect_message,
+            'users': [user_entry],
+            'groups': [],
+        }
+        
+        # Share file via SpecterX API
+        url = f"{SPECTERX_CONFIG['api_base_url']}/access/ext/share"
+        headers = {
+            'accept': 'application/json, text/plain, */*',
+            'content-type': 'application/json; charset=UTF-8',
+            'origin': 'https://staging-app.specterx.com',
+            'referer': 'https://staging-app.specterx.com/',
+            'user-agent': 'SpecterX-Share/1.0',
+            'X-API-Key': SPECTERX_CONFIG['api_key'],
+            'SpecterxUserId': user_id,
+        }
+        
+        response = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            verify=False,
+            timeout=60
+        )
+        
+        if not response.ok:
+            return Response({
+                'error': 'Failed to share file',
+                'message': f'SpecterX API returned status {response.status_code}',
+                'details': response.text[:500]
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Handle response
+        try:
+            result = response.json()
+        except ValueError:
+            result = {'raw': response.text}
+        
+        return Response({
+            'success': True,
+            'message': 'File shared successfully',
+            'file_id': file_id,
+            'recipient': recipient,
+            'result': result
+        }, status=status.HTTP_200_OK)
+        
+    except requests.exceptions.RequestException as e:
+        return Response({
+            'error': 'Network request failed',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    except Exception as e:
+        return Response({
+            'error': 'Internal server error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@cors_enabled(['GET'])
+@api_view(['GET', 'OPTIONS'])
+@csrf_exempt
 def health_check(request):
     """
     Health check endpoint

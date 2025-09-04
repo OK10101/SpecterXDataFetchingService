@@ -157,7 +157,225 @@ This endpoint integrates with the SpecterX platform using:
 - SpecterX initiate upload: 30 seconds  
 - SpecterX file upload: 60 seconds (longer timeout for file transfer)
 
-### 2. Health Check
+### 2. Get Policies
+
+**Endpoint**: `GET /api/policies/`
+
+**Description**: Fetches all available policies from SpecterX admin API.
+
+#### Request Format
+
+No request body required.
+
+#### Response Format
+
+**Success Response (200 OK)**:
+```json
+{
+  "success": true,
+  "policies": [
+    {
+      "policy_id": "policy_123",
+      "name": "Standard Policy",
+      "settings": {...}
+    }
+  ]
+}
+```
+
+**Error Response (400 Bad Request)**:
+```json
+{
+  "error": "Failed to fetch policies from SpecterX",
+  "message": "SpecterX API returned status 401",
+  "details": "Invalid API key"
+}
+```
+
+#### Example Request
+
+```bash
+curl -X GET http://127.0.0.1:8000/api/policies/
+```
+
+### 3. Set File Policy
+
+**Endpoint**: `PUT /api/files/{file_id}/policy/`
+
+**Description**: Sets or updates a policy for a specific file. Requires user ownership validation.
+
+#### Request Format
+
+```json
+{
+  "policy_id": "string (required)",
+  "user_id": "string (optional if provided in header)"
+}
+```
+
+#### Request Headers
+
+| Header | Type | Required | Description |
+|--------|------|----------|-------------|
+| `SpecterxUserId` | string | Conditional | SpecterX user ID (required if not in body) |
+
+#### Request Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `file_id` | string | Yes | SpecterX file ID (URL parameter) |
+| `policy_id` | string | Yes | Policy ID to assign to the file |
+| `user_id` | string | Conditional | SpecterX user ID (required if not in header) |
+
+#### Response Format
+
+**Success Response (200 OK)**:
+```json
+{
+  "success": true,
+  "message": "File policy set successfully",
+  "file_id": "8fab29ed-de04-44e1-95b6-3dbe676294fe",
+  "policy_id": "policy_123",
+  "result": {...}
+}
+```
+
+**Error Responses**:
+
+**400 Bad Request** - Missing parameters:
+```json
+{
+  "error": "Missing required parameter: policy_id"
+}
+```
+
+**400 Bad Request** - SpecterX API error:
+```json
+{
+  "error": "Failed to set file policy",
+  "message": "SpecterX API returned status 403",
+  "details": "User does not own this file"
+}
+```
+
+#### Example Request
+
+```bash
+curl -X PUT http://127.0.0.1:8000/api/files/8fab29ed-de04-44e1-95b6-3dbe676294fe/policy/ \
+  -H "SpecterxUserId: user_specterxstagingmsonmicrosoftcom_40bf5870" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "policy_id": "policy_123"
+  }'
+```
+
+### 4. Share File
+
+**Endpoint**: `POST /api/share/`
+
+**Description**: Shares a file with one or more recipients with configurable permissions and options.
+
+#### Request Format
+
+```json
+{
+  "file_id": "string (required)",
+  "recipient": "string (required)",
+  "user_id": "string (optional if provided in header)",
+  "policy_id": "string (optional)",
+  "notify": "boolean (optional, default: true)",
+  "protect_message": "boolean (optional, default: true)",
+  "message_id": "string (optional)",
+  "read_only": "boolean (optional, default: false)",
+  "actions": "array (optional)",
+  "phone": "string (optional)",
+  "prefix": "string (optional)"
+}
+```
+
+#### Request Headers
+
+| Header | Type | Required | Description |
+|--------|------|----------|-------------|
+| `SpecterxUserId` | string | Conditional | SpecterX user ID (required if not in body) |
+
+#### Request Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `file_id` | string | Yes | SpecterX file ID to share |
+| `recipient` | string | Yes | Email address of the recipient |
+| `user_id` | string | Conditional | SpecterX user ID (required if not in header) |
+| `policy_id` | string | No | Policy ID to apply for this share |
+| `notify` | boolean | No | Notify recipients (default: true) |
+| `protect_message` | boolean | No | Protect message (default: true) |
+| `message_id` | string | No | Optional message ID to correlate |
+| `read_only` | boolean | No | Grant read-only access (default: false) |
+| `actions` | array | No | List of allowed actions (e.g., ["download", "print"]) |
+| `phone` | string | No | Recipient phone number |
+| `prefix` | string | No | Phone prefix/country code |
+
+#### Response Format
+
+**Success Response (200 OK)**:
+```json
+{
+  "success": true,
+  "message": "File shared successfully",
+  "file_id": "8fab29ed-de04-44e1-95b6-3dbe676294fe",
+  "recipient": "bandss@gmail.com",
+  "result": {...}
+}
+```
+
+**Error Responses**:
+
+**400 Bad Request** - Missing parameters:
+```json
+{
+  "error": "Missing required parameter: file_id"
+}
+```
+
+**400 Bad Request** - SpecterX API error:
+```json
+{
+  "error": "Failed to share file",
+  "message": "SpecterX API returned status 403",
+  "details": "User does not have sharing permissions"
+}
+```
+
+#### Example Requests
+
+**Basic Share**:
+```bash
+curl -X POST http://127.0.0.1:8000/api/share/ \
+  -H "SpecterxUserId: user_specterxstagingmsonmicrosoftcom_40bf5870" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "file_id": "8fab29ed-de04-44e1-95b6-3dbe676294fe",
+    "recipient": "bandss@gmail.com"
+  }'
+```
+
+**Advanced Share with Options**:
+```bash
+curl -X POST http://127.0.0.1:8000/api/share/ \
+  -H "SpecterxUserId: user_specterxstagingmsonmicrosoftcom_40bf5870" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "file_id": "8fab29ed-de04-44e1-95b6-3dbe676294fe",
+    "recipient": "bandss@gmail.com",
+    "policy_id": "policy_123",
+    "read_only": true,
+    "actions": ["download", "print"],
+    "notify": true,
+    "protect_message": true
+  }'
+```
+
+### 5. Health Check
 
 **Endpoint**: `GET /api/health/`
 
@@ -183,12 +401,15 @@ curl -X GET http://127.0.0.1:8000/api/health/
 
 - **Graph API Integration**: Seamlessly fetch files from SharePoint/OneDrive using Microsoft Graph API
 - **SpecterX Upload**: Direct integration with SpecterX platform for file uploads
+- **File Policy Management**: Set and update policies for files with user ownership validation
+- **File Sharing**: Share files with recipients with configurable permissions and options
+- **Policy Management**: Retrieve available policies from SpecterX admin API
 - **Single Operation**: Combines file fetching and uploading in one API call
 - **Error Handling**: Comprehensive error responses for all failure scenarios
 
 ## CORS and CSRF
 
-- CSRF protection is disabled for the fetch-upload endpoint to support cross-origin requests from SPFx applications
+- CSRF protection is disabled for specific endpoints (fetch-upload, set-file-policy, share-file) to support cross-origin requests from SPFx applications
 - The service is designed to work with SharePoint Framework applications
 
 ## Error Handling

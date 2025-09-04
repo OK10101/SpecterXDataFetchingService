@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure--i1_v3m3u0yim9h88f-v+*)z3kex(233=d)whw&ig%r)c!yf5%
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["ce55e45c16c5.ngrok-free.app"]
+ALLOWED_HOSTS = ["de16d37be7b5.ngrok-free.app"]
 
 
 # Application definition
@@ -128,6 +128,33 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # CORS settings for SPFx integration
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+
+# Allow all headers for SPFx compatibility
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'specterxuserid',
+]
+
+# Allow all methods needed for the API
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+# Preflight cache time
+CORS_PREFLIGHT_MAX_AGE = 86400
 
 # REST Framework configuration
 REST_FRAMEWORK = {
