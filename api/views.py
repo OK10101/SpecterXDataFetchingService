@@ -12,7 +12,7 @@ from django.conf import settings
 
 SPECTERX_CONFIG = {
     'api_base_url': 'https://staging-api.specterx.com',
-    'api_key': os.getenv('SPECTERX_API_KEY'),
+    'api_key': 'OcEWgYAKcn7jjN6jz7qMh2I6VZkYQ0Qo4UPnVt2R',#os.getenv('SPECTERX_API_KEY'),
     'default_regions': ['eu-central']
 }
 
@@ -48,7 +48,7 @@ def cors_enabled(allowed_methods):
 
 
 @cors_enabled(['POST'])
-@api_view(['POST', 'OPTIONS'])
+@api_view(['POST'])
 @csrf_exempt
 def fetch_and_upload_file(request):
     """
@@ -74,7 +74,19 @@ def fetch_and_upload_file(request):
         graph_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/items/{drive_item_id}/content"
         graph_headers = {'Authorization': f'Bearer {graph_token}'}
         
-        graph_response = requests.get(graph_url, headers=graph_headers, timeout=30)
+        try:
+            graph_response = requests.get(graph_url, headers=graph_headers, timeout=30)
+        except requests.exceptions.Timeout:
+            return Response({
+                'error': 'Graph API timeout',
+                'message': 'Microsoft Graph API request timed out after 30 seconds'
+            }, status=status.HTTP_408_REQUEST_TIMEOUT)
+        except requests.exceptions.ConnectionError:
+            return Response({
+                'error': 'Graph API connection error',
+                'message': 'Unable to connect to Microsoft Graph API'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            
         if not graph_response.ok:
             return Response({
                 'error': 'Failed to fetch file from Graph API',
@@ -84,8 +96,13 @@ def fetch_and_upload_file(request):
         
         file_content = graph_response.content
         
-        # Step 2: Initiate upload to SpecterX
+        if not file_content:
+            return Response({
+                'error': 'Empty file content',
+                'message': 'Graph API returned empty file content'
+            }, status=status.HTTP_400_BAD_REQUEST)
         
+        # Step 2: Initiate upload to SpecterX
         initiate_payload = {
             'filename': filename,
             'parent_folder': None,
@@ -98,12 +115,23 @@ def fetch_and_upload_file(request):
             'SpecterxUserId': user_id
         }
         
-        initiate_response = requests.post(
-            f"{SPECTERX_CONFIG['api_base_url']}/upload/ext/files",
-            headers=initiate_headers,
-            json=initiate_payload,
-            timeout=30
-        )
+        try:
+            initiate_response = requests.post(
+                f"{SPECTERX_CONFIG['api_base_url']}/upload/ext/files",
+                headers=initiate_headers,
+                json=initiate_payload,
+                timeout=30
+            )
+        except requests.exceptions.Timeout:
+            return Response({
+                'error': 'Request timeout',
+                'message': 'SpecterX API initiate upload request timed out after 30 seconds'
+            }, status=status.HTTP_408_REQUEST_TIMEOUT)
+        except requests.exceptions.ConnectionError:
+            return Response({
+                'error': 'Connection error',
+                'message': 'Unable to connect to SpecterX API for initiate upload'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         
         if not initiate_response.ok:
             return Response({
@@ -112,9 +140,22 @@ def fetch_and_upload_file(request):
                 'details': initiate_response.text[:500]
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        initiate_data = initiate_response.json()
+        try:
+            initiate_data = initiate_response.json()
+        except json.JSONDecodeError:
+            return Response({
+                'error': 'Invalid response from SpecterX',
+                'message': 'SpecterX API returned invalid JSON response for initiate upload'
+            }, status=status.HTTP_502_BAD_GATEWAY)
+            
         upload_url = initiate_data.get('url')
         file_id = initiate_data.get('file_id')
+        
+        if not upload_url or not file_id:
+            return Response({
+                'error': 'Invalid SpecterX response',
+                'message': 'SpecterX API did not return required upload_url or file_id'
+            }, status=status.HTTP_502_BAD_GATEWAY)
         
         # Step 3: Upload file content to SpecterX
         upload_headers = {
@@ -123,12 +164,23 @@ def fetch_and_upload_file(request):
             'SpecterxUserId': user_id
         }
         
-        upload_response = requests.put(
-            upload_url,
-            headers=upload_headers,
-            data=file_content,
-            timeout=60
-        )
+        try:
+            upload_response = requests.put(
+                upload_url,
+                headers=upload_headers,
+                data=file_content,
+                timeout=60
+            )
+        except requests.exceptions.Timeout:
+            return Response({
+                'error': 'Upload timeout',
+                'message': 'File upload to SpecterX timed out after 60 seconds'
+            }, status=status.HTTP_408_REQUEST_TIMEOUT)
+        except requests.exceptions.ConnectionError:
+            return Response({
+                'error': 'Upload connection error',
+                'message': 'Unable to connect to SpecterX for file upload'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         
         if not upload_response.ok:
             return Response({
@@ -175,11 +227,25 @@ def get_policies(request):
             'user-agent': 'SpecterX-PolicyGetter/1.0',
             'origin': 'https://staging-app.specterx.com',
             'referer': 'https://staging-app.specterx.com/',
-            'X-API-Key': SPECTERX_CONFIG['api_key'],
+            #'X-API-Key': SPECTERX_CONFIG['api_key'],
             'SpecterxUserId': user_id,
+            'authorization': 'AWS4-HMAC-SHA256 Credential=ASIARDE6JUAQOMAHTOOE/20250905/eu-central-1/execute-api/aws4_request, SignedHeaders=host;x-amz-date;x-amz-security-token, Signature=280e646ec4311d7f9b2c1c1f36e02110294ad4a6e30ef384e603e82b6680d8de',
+            'x-amz-date': '20250905T114405Z',
+            'x-amz-security-token': 'IQoJb3JpZ2luX2VjEAwaDGV1LWNlbnRyYWwtMSJFMEMCIC1Fu3UUAZmzbGIbCtur+fdkj7dCzX8GSjLlEu7zEAtsAh8Yy5AdD8idtuB4+ZV5XWmPnTKX68zdxaNij8SznaJ7KtYECHUQAxoMMDc1NDkzOTA4NTEyIgztHGmGQ7I3kNpOVssqswT5bN2g9exWoaYkiXiFTxpjC5Prj0G2xQGoZJ29MTgx9yYzVLj6COROMpelGuKxTSjEAXEKyww7KLoSB7s6JZ6EEr3/Wa6qQy48WGp/2Nl6kBDriy52P5Gk5sLqfXj7S58J/YfmYm8E9tnwzqrLuTr/jgNXYfHikcKJ2qVHYF3TETK2ALKw0zMdmrJzVWngIoz/hWvkrk2L8ONWu0tAVzte7XrRP2cx9eatnrH0NMTnn5djRMjwtUec64cXVSOJ0sSqWf58Kv0leD80G/A063ls5KrvA8tzmNMqGjMGAi8u5FsKy4GVidimuaHkQ/gskBSfd36aMaRrKDqwrCYRGabZcOxpUAVjO9OihajhSs/cAjWnAJtzmTF3RgI4XeXpYC/UprVvfa/SGzYGSiWFsaBGulr2c7Hj92g4+Lx2UynHxpqhxaCLKANbxGw4drXm2102aCAA4pFnHJ7cPTckVucnhGb3CFpWMLapld4cHoby6cdeS/vGDmHw2rNAgsw4lcS6to842wF9yYC+HGkLNxD4K1xkPFeQ9x5f8sCM0gRDg3LGXSsi+tRPdBo4OJOZvMslZx2KsfmayT3ytuK0zQhNwq5YSYh4sVHje0glLxx7BCXTZRIv3dTySA3yy4lpIC5QIwqnzNNq9TqIB2fxvON8dI8aKF5x+WqUSkdx9pRMWOfbM/cFcI1XJHakdkzPLEzbtGVk9hUNO0s67AUnGbPfrtk4bMBmb5lXFCgnff72JzU7GDCFmuvFBjqHAlXlf2dQsWucy7x4AQ4dWuGjG0NU410wUbDNpON9+Aj25Fohx6T4n5zJ+q4LyZwqQX9lxYTBCBTw3an50yYjx8votA+acJSaYf2jgjg61zwoMnYJ+FLqP0LJ2i5ZngBHezpp1SsLCET2XA0RApoq6udNYTVPofm1S7NVM5RL8EHRU4sAtf/CIxiXHOd97yJLiYHvUdhV7yCv98wxErXTTaPbKBITfXpmFTa/wWkVvFlK72wzCWkvZVpowvWlcrJcynDdRliGGAub9pMSGScyu+xTZyaJwev8cF3i8lUwiiO6EC8eydxT9gSGPNTfunQW68DDsJYVNjehLgEBcxaGThPexhQ/nJDU'
         }
         
-        response = requests.get(policies_url, headers=headers, timeout=30)
+        try:
+            response = requests.get(policies_url, headers=headers, timeout=30)
+        except requests.exceptions.Timeout:
+            return Response({
+                'error': 'Request timeout',
+                'message': 'SpecterX policies API request timed out after 30 seconds'
+            }, status=status.HTTP_408_REQUEST_TIMEOUT)
+        except requests.exceptions.ConnectionError:
+            return Response({
+                'error': 'Connection error',
+                'message': 'Unable to connect to SpecterX policies API'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         
         if not response.ok:
             return Response({
@@ -188,7 +254,13 @@ def get_policies(request):
                 'details': response.text[:500]
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        policies_data = response.json()
+        try:
+            policies_data = response.json()
+        except json.JSONDecodeError:
+            return Response({
+                'error': 'Invalid response from SpecterX',
+                'message': 'SpecterX policies API returned invalid JSON response'
+            }, status=status.HTTP_502_BAD_GATEWAY)
         
         # Handle both list and dict responses
         if isinstance(policies_data, list):
@@ -251,13 +323,24 @@ def set_file_policy(request, file_id):
         
         payload = {'policy_id': policy_id}
         
-        response = requests.put(
-            url,
-            headers=headers,
-            json=payload,
-            verify=False,
-            timeout=60
-        )
+        try:
+            response = requests.put(
+                url,
+                headers=headers,
+                json=payload,
+                verify=False,
+                timeout=60
+            )
+        except requests.exceptions.Timeout:
+            return Response({
+                'error': 'Request timeout',
+                'message': 'SpecterX set policy API request timed out after 60 seconds'
+            }, status=status.HTTP_408_REQUEST_TIMEOUT)
+        except requests.exceptions.ConnectionError:
+            return Response({
+                'error': 'Connection error',
+                'message': 'Unable to connect to SpecterX set policy API'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         
         if not response.ok:
             return Response({
@@ -269,7 +352,7 @@ def set_file_policy(request, file_id):
         # Handle response
         try:
             result = response.json()
-        except ValueError:
+        except (ValueError, json.JSONDecodeError):
             result = {'raw': response.text}
         
         return Response({
@@ -367,13 +450,24 @@ def share_file(request):
             'SpecterxUserId': user_id,
         }
         
-        response = requests.post(
-            url,
-            headers=headers,
-            json=payload,
-            verify=False,
-            timeout=60
-        )
+        try:
+            response = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                verify=False,
+                timeout=60
+            )
+        except requests.exceptions.Timeout:
+            return Response({
+                'error': 'Request timeout',
+                'message': 'SpecterX share file API request timed out after 60 seconds'
+            }, status=status.HTTP_408_REQUEST_TIMEOUT)
+        except requests.exceptions.ConnectionError:
+            return Response({
+                'error': 'Connection error',
+                'message': 'Unable to connect to SpecterX share file API'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         
         if not response.ok:
             return Response({
@@ -385,7 +479,7 @@ def share_file(request):
         # Handle response
         try:
             result = response.json()
-        except ValueError:
+        except (ValueError, json.JSONDecodeError):
             result = {'raw': response.text}
         
         return Response({
@@ -393,6 +487,110 @@ def share_file(request):
             'message': 'File shared successfully',
             'file_id': file_id,
             'recipient': recipient,
+            'result': result
+        }, status=status.HTTP_200_OK)
+        
+    except requests.exceptions.RequestException as e:
+        return Response({
+            'error': 'Network request failed',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    except Exception as e:
+        return Response({
+            'error': 'Internal server error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@cors_enabled(['POST'])
+@api_view(['POST', 'OPTIONS'])
+@csrf_exempt
+def get_multiple_link(request):
+    """
+    API endpoint to get shareable link for multiple files
+    """
+    try:
+        # Extract required parameters
+        files_ids = request.data.get('files_ids', [])
+        recipient_identity = request.data.get('recipient_identity')
+        user_id = request.headers.get('SpecterxUserId') or request.data.get('user_id')
+        
+        # Validate required parameters
+        if not files_ids or not isinstance(files_ids, list):
+            return Response({
+                'error': 'Missing required parameter: files_ids (must be array)'
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        if not user_id:
+            return Response({
+                'error': 'Missing required parameter: user_id (header SpecterxUserId or body user_id)'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get multiple link via SpecterX API
+        url = f"{SPECTERX_CONFIG['api_base_url']}/access/ext/files/multiple_link"
+        headers = {
+            'accept': 'application/json, text/plain, */*',
+            'content-type': 'application/json; charset=UTF-8',
+            'origin': 'https://staging-app.specterx.com',
+            'referer': 'https://staging-app.specterx.com/',
+            'user-agent': 'SpecterX-LinkGetter/1.0',
+            'X-API-Key': SPECTERX_CONFIG['api_key'],
+            'SpecterxUserId': user_id,
+        }
+        
+        payload = {
+            'files_ids': files_ids,
+            'recipient_identity': recipient_identity or '__NO_RECIPIENT__'
+        }
+        
+        try:
+            response = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                verify=False,
+                timeout=30
+            )
+        except requests.exceptions.Timeout:
+            return Response({
+                'error': 'Request timeout',
+                'message': 'SpecterX multiple link API request timed out after 30 seconds'
+            }, status=status.HTTP_408_REQUEST_TIMEOUT)
+        except requests.exceptions.ConnectionError:
+            return Response({
+                'error': 'Connection error',
+                'message': 'Unable to connect to SpecterX multiple link API'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        
+        if not response.ok:
+            return Response({
+                'error': 'Failed to get multiple link',
+                'message': f'SpecterX API returned status {response.status_code}',
+                'details': response.text[:500]
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Handle response
+        try:
+            result = response.json()
+        except (ValueError, json.JSONDecodeError):
+            return Response({
+                'error': 'Invalid response from SpecterX',
+                'message': 'SpecterX multiple link API returned invalid JSON response'
+            }, status=status.HTTP_502_BAD_GATEWAY)
+        
+        # Validate result has expected fields
+        if not isinstance(result, dict):
+            return Response({
+                'error': 'Invalid response format',
+                'message': 'SpecterX multiple link API returned unexpected response format'
+            }, status=status.HTTP_502_BAD_GATEWAY)
+            
+        return Response({
+            'success': True,
+            'message': 'Multiple link retrieved successfully',
+            'files_ids': files_ids,
+            'link': result.get('link', ''),
             'result': result
         }, status=status.HTTP_200_OK)
         
